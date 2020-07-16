@@ -148,7 +148,7 @@ namespace Inu.Language
 
         protected virtual void SkipSpaces()
         {
-            SkipChars(char.IsWhiteSpace);
+            SkipChars(IsSpace);
         }
 
         protected char NextChar()
