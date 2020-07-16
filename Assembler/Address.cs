@@ -16,7 +16,7 @@ namespace Inu.Assembler
         public AddressType Type { get; private set; }
         public int Value { get; private set; }
 
-        public readonly int? Id;
+        public int? Id { get; private set; }
 
         public bool Parenthesized { get; set; } = false;
         public static Address Default => new Address(AddressType.Const, 0);
@@ -45,12 +45,19 @@ namespace Inu.Assembler
         {
             stream.WriteByte((int)Type);
             stream.WriteWord(Value);
+            if (Type == AddressType.External) {
+                Debug.Assert(Id != null);
+                stream.WriteWord(Id.Value);
+            }
         }
 
         public void Read(Stream stream)
         {
             Type = (AddressType)(sbyte)stream.ReadByte();
             Value = stream.ReadWord();
+            if (Type == AddressType.External) {
+                Id = stream.ReadWord();
+            }
         }
 
         public void AddOffset(int offset) { Value += offset; }
