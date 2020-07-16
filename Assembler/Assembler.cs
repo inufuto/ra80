@@ -6,7 +6,7 @@ using System.IO;
 
 namespace Inu.Assembler
 {
-    abstract class AbstractAssembler : Language.TokenReader
+    abstract class Assembler : Language.TokenReader
     {
         public const int Failure = 1;
         public const int Success = 0;
@@ -23,7 +23,7 @@ namespace Inu.Assembler
         public int Pass { get; private set; }
 
         private bool addressChanged;
-        private ListFile listFile = new ListFile();
+        private ListFile? listFile;
         private int nextAutoLabelId;
         private readonly Stack<Block> blocks = new Stack<Block>();
 
@@ -31,7 +31,7 @@ namespace Inu.Assembler
 
         public bool DefineSymbol(int id, Address address)
         {
-            Symbol symbol = FindSymbol(id);
+            var symbol = FindSymbol(id);
             if (symbol == null) {
                 symbols[id] = new Symbol(Pass, id, address);
                 return true;
@@ -54,17 +54,17 @@ namespace Inu.Assembler
             }
         }
 
-        protected Symbol FindSymbol(int id)
+        protected Symbol? FindSymbol(int id)
         {
-            if (symbols.TryGetValue(id, out Symbol symbol)) {
+            if (symbols.TryGetValue(id, out var symbol)) {
                 return symbol;
             }
             return null;
         }
 
-        protected Symbol FindSymbol(Token identifier)
+        protected Symbol? FindSymbol(Token identifier)
         {
-            Symbol symbol = FindSymbol(identifier.Value);
+            var symbol = FindSymbol(identifier.Value);
             if (symbol != null) {
                 if (Pass > 1 && symbol.Address.IsUndefined()) {
                     ShowUndefinedError(identifier);
@@ -79,11 +79,8 @@ namespace Inu.Assembler
 
         protected Address SymbolAddress(int id)
         {
-            Symbol symbol = FindSymbol(id);
-            if (symbol != null) {
-                return symbol.Address;
-            }
-            return new Address(AddressType.Undefined, 0);
+            var symbol = FindSymbol(id);
+            return symbol != null ? symbol.Address : new Address(AddressType.Undefined, 0);
         }
 
         protected Address SymbolAddress(Token identifier)
@@ -99,6 +96,7 @@ namespace Inu.Assembler
         protected void WriteByte(int value)
         {
             CurrentSegment.WriteByte(value);
+            Debug.Assert(listFile != null);
             listFile.AddByte(value);
         }
 
@@ -116,6 +114,7 @@ namespace Inu.Assembler
             byte[] bytes = ToBytes(value.Value);
             foreach (byte b in bytes) {
                 CurrentSegment.WriteByte(b);
+                Debug.Assert(listFile != null);
                 listFile.AddByte(b);
             }
         }
@@ -128,11 +127,13 @@ namespace Inu.Assembler
         }
 
 
-        protected static void OpenSourceFile(string fileName) { AbstractTokenizer.Instance.OpenSourceFile(fileName); }
+        protected static void OpenSourceFile(string fileName) { Tokenizer.Instance.OpenSourceFile(fileName); }
 
         protected Token SkipEndOfStatement()
         {
+            Debug.Assert(listFile != null);
             bool newLine = false;
+            Debug.Assert(LastToken != null);
             if (LastToken.IsReservedWord(SourceReader.EndOfLine)) {
                 listFile.PrintLine();
                 newLine = true;
@@ -172,23 +173,25 @@ namespace Inu.Assembler
         protected Address CurrentAddress => CurrentSegment.Tail;
 
 
-        private Address CharConstant()
+        private Address? CharConstant()
         {
-            if (LastToken.Type == TokenType.StringValue) {
-                Address value = new Address(LastToken.String().ToCharArray()[0]);
-                NextToken();
-                return value;
-            }
-            return null;
+            Debug.Assert(LastToken != null);
+            if (LastToken.Type != TokenType.StringValue) return null;
+            var s = LastToken.String();
+            Debug.Assert(s != null);
+            Address value = new Address(s.ToCharArray()[0]);
+            NextToken();
+            return value;
         }
 
-        private Address ParenthesisExpression()
+        private Address? ParenthesisExpression()
         {
+            Debug.Assert(LastToken != null);
             if (!LastToken.IsReservedWord('(')) {
                 return null;
             }
             NextToken();
-            Address value = Expression();
+            var value = Expression();
             AcceptReservedWord(')');
             if (value == null) {
                 ShowSyntaxError();
@@ -205,14 +208,15 @@ namespace Inu.Assembler
             { Keyword.Low, (int right) =>{return right & 0xff; } },
             { Keyword.High, (int right) =>{return (right >> 8) & 0xff; } },
         };
-        private Address Monomial()
+        private Address? Monomial()
         {
+            Debug.Assert(LastToken != null);
             Token token = LastToken;
-            if (!Monomials.TryGetValue(token.Value, out Func<int, int> function)) {
+            if (!Monomials.TryGetValue(token.Value, out var function)) {
                 return null;
             }
             Token rightToken = NextToken();
-            Address right = Factor();
+            var right = Factor();
             if (right == null) {
                 ShowSyntaxError();
                 return null;
@@ -224,10 +228,11 @@ namespace Inu.Assembler
             return new Address(value);
         }
 
-        private Address Factor()
+        private Address? Factor()
         {
-            TokenType type = LastToken.Type;
-            Address value;
+            Debug.Assert(LastToken != null);
+            var type = LastToken.Type;
+            Address? value;
             switch (type) {
                 case TokenType.NumericValue:
                     value = new Address(LastToken.Value);
@@ -274,30 +279,30 @@ namespace Inu.Assembler
             }
         };
 
-        private Address Binomial(int level)
+        private Address? Binomial(int level)
         {
-            Func<Address> factorFunction;
+            Func<Address?> factorFunction;
             if (Binomials[level + 1].Count == 0) {
                 factorFunction = Factor;
             }
             else {
-                factorFunction = () => { return Binomial(level + 1); };
+                factorFunction = () => Binomial(level + 1);
             }
-
+            Debug.Assert(LastToken != null);
             Token leftToken = LastToken;
-            Address left = factorFunction();
+            var left = factorFunction();
             if (left == null) {
                 //ShowSyntaxError();
                 return null;
             }
 
-        repeat:
+            repeat:
             {
                 Token operatorToken = LastToken;
                 if (operatorToken.Type == TokenType.ReservedWord) {
-                    if (Binomials[level].TryGetValue(operatorToken.Value, out Func<int, int, int> operation)) {
+                    if (Binomials[level].TryGetValue(operatorToken.Value, out var operation)) {
                         Token rightToken = NextToken();
-                        Address right = factorFunction();
+                        var right = factorFunction();
                         if (right == null) {
                             ShowSyntaxError();
                             return null;
@@ -306,7 +311,7 @@ namespace Inu.Assembler
                             ShowAddressUsageError(rightToken);
                         }
                         else if (left.IsConst() || left.IsRelocatable() && (operatorToken.Value == '+' || operatorToken.Value == '-')) {
-                            left = new Address(left.Type, operation(left.Value, right.Value));
+                            left = new Address(left.Type, operation(left.Value, right.Value), left.Id);
                         }
                         else {
                             ShowAddressUsageError(leftToken);
@@ -317,17 +322,18 @@ namespace Inu.Assembler
             }
             return left;
         }
-        private Address Binomial() { return Binomial(0); }
+        private Address? Binomial() { return Binomial(0); }
 
-        protected Address Expression()
+        protected Address? Expression()
         {
             return Binomial();
         }
 
         protected int? ByteExpression()
         {
-            Token token = LastToken;
-            Address value = Expression();
+            Debug.Assert(LastToken != null);
+            var token = LastToken;
+            var value = Expression();
             if (value == null) { return null; }
             if (!value.IsConst()) {
                 ShowAddressUsageError(token);
@@ -340,12 +346,13 @@ namespace Inu.Assembler
         {
             Token token = NextToken();
             if (token.Type == TokenType.StringValue) {
-                string fileName = token.String();
-                if (File.Exists(fileName)) {
+                var fileName = token.String();
+                try {
+                    Debug.Assert(fileName != null);
                     OpenSourceFile(fileName);
                 }
-                else {
-                    ShowError(token.Position, "File not found: " + fileName);
+                catch (IOException e) {
+                    ShowError(token.Position, e.Message);
                 }
                 NextToken();
             }
@@ -356,15 +363,17 @@ namespace Inu.Assembler
         private void SegmentDirective(AddressType type)
         {
             CurrentSegment = segments[(int)type];
+            Debug.Assert(listFile != null);
             listFile.Address = CurrentSegment.Tail;
             NextToken();
         }
         private void PublicDirective()
         {
+            Debug.Assert(LastToken != null);
             do {
                 Token token = NextToken();
                 if (token.Type == TokenType.Identifier) {
-                    Symbol symbol = FindSymbol(LastToken);
+                    var symbol = FindSymbol(LastToken);
                     if (symbol != null) {
                         symbol.Public = true;
                     }
@@ -377,12 +386,13 @@ namespace Inu.Assembler
         }
         private void ExternDirective()
         {
+            Debug.Assert(LastToken != null);
             do {
                 Token token = NextToken();
                 if (token.Type == TokenType.Identifier) {
-                    var label = token;
+                    Token label = token;
                     token = NextToken();
-                    DefineSymbol(label, new Address(AddressType.External, label.Value));
+                    DefineSymbol(label, new Address(AddressType.External, 0, label.Value));
                 }
                 else {
                     ShowMissingIdentifier(token.Position);
@@ -391,9 +401,11 @@ namespace Inu.Assembler
         }
         private bool ByteStorageOperand()
         {
+            Debug.Assert(LastToken != null);
             Token token = LastToken;
             if (token.Type == TokenType.StringValue) {
-                string s = token.String();
+                var s = token.String();
+                Debug.Assert(s != null);
                 foreach (char c in s) {
                     WriteByte(c);
                 }
@@ -401,16 +413,14 @@ namespace Inu.Assembler
                 return true;
             }
             int? value = ByteExpression();
-            if (value != null) {
-                WriteByte(value.Value);
-                return true;
-            }
-            return false;
+            if (value == null) return false;
+            WriteByte(value.Value);
+            return true;
         }
         private bool WordStorageOperand()
         {
             Token token = LastToken;
-            Address value = Expression();
+            var value = Expression();
             if (value == null) { return false; }
             WriteWord(token, value);
             return true;
@@ -418,7 +428,7 @@ namespace Inu.Assembler
         private bool SpaceStorageOperand()
         {
             Token token = LastToken;
-            Address value = Expression();
+            var value = Expression();
             if (value == null) { return false; }
             if (!value.IsConst()) {
                 ShowAddressUsageError(token);
@@ -427,24 +437,24 @@ namespace Inu.Assembler
             return true;
         }
 
-        private static readonly Dictionary<int, Func<AbstractAssembler, bool>> StorageDirectives = new Dictionary<int, Func<AbstractAssembler, bool>>
+        private static readonly Dictionary<int, Func<Assembler, bool>> StorageDirectives = new Dictionary<int, Func<Assembler, bool>>
         {
-            { Keyword.DefB, (AbstractAssembler t)=>t.ByteStorageOperand()},
-            { Keyword.DefW, (AbstractAssembler t)=>t.WordStorageOperand()},
-            { Keyword.DefS, (AbstractAssembler t)=>t.SpaceStorageOperand()},
-            { Keyword.Db, (AbstractAssembler t)=>t.ByteStorageOperand()},
-            { Keyword.Dw, (AbstractAssembler t)=>t.WordStorageOperand()},
-            { Keyword.Ds, (AbstractAssembler t)=>t.SpaceStorageOperand()},
+            { Keyword.DefB, (Assembler t)=>t.ByteStorageOperand()},
+            { Keyword.DefW, (Assembler t)=>t.WordStorageOperand()},
+            { Keyword.DefS, (Assembler t)=>t.SpaceStorageOperand()},
+            { Keyword.Db, (Assembler t)=>t.ByteStorageOperand()},
+            { Keyword.Dw, (Assembler t)=>t.WordStorageOperand()},
+            { Keyword.Ds, (Assembler t)=>t.SpaceStorageOperand()},
         };
 
-        protected AbstractAssembler()
+        protected Assembler()
         {
             CurrentSegment = segments[0];
         }
 
         private bool StorageDirective()
         {
-            if (StorageDirectives.TryGetValue(LastToken.Value, out Func<AbstractAssembler, bool> function)) {
+            if (StorageDirectives.TryGetValue(LastToken.Value, out var function)) {
                 do {
                     NextToken();
                     if (!function(this)) {
@@ -458,7 +468,7 @@ namespace Inu.Assembler
         private void EquDirective(Token label)
         {
             NextToken();
-            Address value = Expression();
+            var value = Expression();
             if (value == null) {
                 ShowSyntaxError();
                 return;
@@ -490,7 +500,7 @@ namespace Inu.Assembler
             Token identifier = LastToken;
             Token token = NextToken();
             if (token.IsReservedWord(':')) {
-                var address = CurrentAddress;
+                Address address = CurrentAddress;
                 DefineSymbol(identifier, address);
                 NextToken();
             }
@@ -533,7 +543,7 @@ namespace Inu.Assembler
             const int InstructionLength = 2;
             return address.Value - (CurrentAddress.Value + InstructionLength);
         }
-        protected bool RelativeOffset(out Address address, out int offset)
+        protected bool RelativeOffset(out Address? address, out int offset)
         {
             offset = 0;
             Token operand = LastToken;
@@ -568,12 +578,13 @@ namespace Inu.Assembler
         protected int AutoLabel()
         {
             int id = nextAutoLabelId++;
-            //DefineSymbol(id, Address(Address::Undefined, 0));
+            //DefineSymbol(id, Address(AddressType.Undefined, 0));
             return id++;
         }
 
-        protected Block LastBlock()
+        protected Block? LastBlock()
         {
+            Debug.Assert(listFile != null);
             listFile.IndentLevel = blocks.Count - 1;
             return blocks.Count > 0 ? blocks.Peek() : null;
         }
@@ -595,47 +606,52 @@ namespace Inu.Assembler
         protected void EndBlock()
         {
             Debug.Assert(blocks.Count > 0);
+            Debug.Assert(listFile != null);
             blocks.Pop();
             listFile.IndentLevel = blocks.Count;
         }
 
         private void SaveObj(string fileName)
         {
-            Stream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write);
-            stream.WriteWord(ObjVersion);
-            foreach (Segment segment in segments) {
-                segment.Write(stream);
-            }
-
-            ISet<int> ids = new HashSet<int>();
-            IList<Symbol> publicSymbols = new List<Symbol>();
-            foreach (Symbol symbol in symbols.Values) {
-                if (symbol.Public) {
-                    publicSymbols.Add(symbol);
-                    ids.Add(symbol.Id);
-                };
-            }
-            foreach (Address address in addressUsages.Values) {
-                if (address.Type == AddressType.External) {
-                    ids.Add(address.Value);
+            using (Stream stream = new FileStream(fileName, FileMode.Create, FileAccess.Write)) {
+                stream.WriteWord(ObjVersion);
+                foreach (Segment segment in segments) {
+                    segment.Write(stream);
                 }
-            }
 
-            stream.WriteWord(ids.Count);
-            foreach (int id in ids) {
-                stream.WriteWord(id);
-                stream.WriteString(AbstractTokenizer.Instance.IdentifierFromId(id));
-            }
+                ISet<int> ids = new HashSet<int>();
+                IList<Symbol> publicSymbols = new List<Symbol>();
+                foreach (Symbol symbol in symbols.Values) {
+                    if (symbol.Public) {
+                        publicSymbols.Add(symbol);
+                        ids.Add(symbol.Id);
+                    };
+                }
+                foreach (Address address in addressUsages.Values) {
+                    if (address.Type == AddressType.External) {
+                        Debug.Assert(address.Id != null);
+                        ids.Add(address.Id.Value);
+                    }
+                }
 
-            stream.WriteWord(publicSymbols.Count);
-            foreach (var symbol in publicSymbols) {
-                symbol.Write(stream);
-            }
+                stream.WriteWord(ids.Count);
+                foreach (int id in ids) {
+                    stream.WriteWord(id);
+                    var fromId = Tokenizer.Instance.IdentifierFromId(id);
+                    Debug.Assert(fromId != null);
+                    stream.WriteString(fromId);
+                }
 
-            stream.WriteWord(addressUsages.Count);
-            foreach (var pair in addressUsages) {
-                pair.Key.Write(stream);
-                pair.Value.Write(stream);
+                stream.WriteWord(publicSymbols.Count);
+                foreach (Symbol symbol in publicSymbols) {
+                    symbol.Write(stream);
+                }
+
+                stream.WriteWord(addressUsages.Count);
+                foreach (KeyValuePair<Address, Address> pair in addressUsages) {
+                    pair.Key.Write(stream);
+                    pair.Value.Write(stream);
+                }
             }
         }
         private void Assemble()
@@ -665,26 +681,24 @@ namespace Inu.Assembler
         }
         private int Assemble(string sourceName, string objName, string listName)
         {
-            SourceReader.Printer = listFile;
-
             for (Pass = 1; (Pass <= 2 || addressChanged) && ErrorCount <= 0; ++Pass) {
                 Console.Out.WriteLine("Pass " + Pass);
                 addressChanged = false;
-                listFile.Clear();
+                listFile = new ListFile(listName);
+                SourceReader.Printer = listFile;
                 addressUsages.Clear();
                 nextAutoLabelId = AutoLabelMinId;
                 try {
                     OpenSourceFile(sourceName);
                 }
-                catch (IOException) {
-                    Console.Error.WriteLine("Cannot open file: " + sourceName);
+                catch (IOException e) {
+                    Console.Error.WriteLine(e.Message);
                     return Failure;
                 }
-                foreach (var segment in segments) {
+                foreach (Segment segment in segments) {
                     segment.Clear();
                 }
                 listFile.Address = CurrentSegment.Tail;
-                listFile.Open(listName);
                 Assemble();
                 listFile.Close();
             }
@@ -701,9 +715,9 @@ namespace Inu.Assembler
                 return Failure;
             }
 
-            var sourceName = Path.GetFullPath(args[0]);
-            var objName = Path.ChangeExtension(sourceName, ObjExt);
-            var listName = Path.ChangeExtension(sourceName, ListFile.Ext);
+            string sourceName = Path.GetFullPath(args[0]);
+            string objName = Path.ChangeExtension(sourceName, ObjExt);
+            string listName = Path.ChangeExtension(sourceName, ListFile.Ext);
             return Assemble(sourceName, objName, listName);
         }
     }

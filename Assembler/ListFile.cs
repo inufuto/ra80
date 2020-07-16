@@ -1,4 +1,5 @@
 ﻿using Inu.Language;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -6,7 +7,7 @@ using System.Text;
 
 namespace Inu.Assembler
 {
-    class ListFile : SourcePrinter
+    class ListFile : SourcePrinter, IDisposable
     {
         private const int MaxBytes = 6;
         private const string Suffix = "\'\"";
@@ -14,23 +15,30 @@ namespace Inu.Assembler
 
         private StreamWriter writer;
         public int IndentLevel { get; set; }
-        public Address Address { get; set; }
+        public Address? Address { get; set; }
         private readonly List<byte> bytes = new List<byte>();
         private readonly List<string> sourceLines = new List<string>();
 
-        public void Open(string fileName)
+        public ListFile(string fileName)
         {
             writer = new StreamWriter(fileName, false, Encoding.UTF8);
         }
+
+        public void Dispose()
+        {
+            writer.Dispose();
+        }
+
 
         public void AddByte(int value) { bytes.Add((byte)value); }
 
         public void PrintLine()
         {
-            if (writer==null) { return; }
+            if (writer == null) { return; }
             int lineCount = 0;
             int byteCount = 0;
             while (byteCount < bytes.Count || lineCount < sourceLines.Count) {
+                Debug.Assert(Address != null);
                 PrintAddress(Address);
                 for (int i = 0; i < MaxBytes; ++i) {
                     if (byteCount < bytes.Count) {
@@ -49,9 +57,9 @@ namespace Inu.Assembler
             Clear();
         }
 
-        public override void AddSourceLine(string sourceLine) { sourceLines.Add(sourceLine); }
+        public override void AddSourceLine(string sourceLine) => sourceLines.Add(sourceLine);
 
-        public void Clear()
+        private void Clear()
         {
             bytes.Clear();
             sourceLines.Clear();
@@ -79,9 +87,10 @@ namespace Inu.Assembler
 
         private static string ToHex(int value, int length)
         {
-            string s=string.Format("{0:X4}", value);
+            string s = string.Format("{0:X4}", value);
             Debug.Assert(s.Length <= 4);
             return s.Substring(s.Length - length);
         }
+
     }
 }

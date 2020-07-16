@@ -8,11 +8,16 @@ namespace Inu.Language
     class TokenReader
     {
         public Token LastToken { get; private set; }
-        private Dictionary<SourcePosition, string> errors = new Dictionary<SourcePosition, string>();
+        private readonly Dictionary<SourcePosition, string> errors = new Dictionary<SourcePosition, string>();
+
+        public TokenReader()
+        {
+            LastToken = new Token(new SourcePosition("", 0),TokenType.ReservedWord, Tokenizer.EndOfFile);
+        }
 
         public Token NextToken()
         {
-            return LastToken = AbstractTokenizer.Instance.GetToken();
+            return LastToken = Tokenizer.Instance.GetToken();
         }
 
         public void ShowError(SourcePosition position, string error)

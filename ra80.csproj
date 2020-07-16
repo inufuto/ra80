@@ -10,7 +10,15 @@
     <NoWin32Manifest>true</NoWin32Manifest>
     <PublishSingleFile>true</PublishSingleFile>
     <RuntimeIdentifier>win10-x86</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="down.bat" />
+    <None Remove="liblist.bat" />
+    <None Remove="ud.bat" />
+    <None Remove="up.bat" />
+  </ItemGroup>
 
   <ItemGroup>
     <Folder Include="Properties\PublishProfiles\" />

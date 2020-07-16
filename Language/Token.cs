@@ -19,9 +19,8 @@ namespace Inu.Language
         public SourcePosition Position { get; private set; }
         public TokenType Type { get; private set; }
         public int Value { get; private set; }
-
 #if DEBUG
-        string asString;
+        string? asString;
 #endif
         public Token(SourcePosition position, TokenType type, int value)
         {
@@ -40,32 +39,32 @@ namespace Inu.Language
             return Type == TokenType.Identifier;
         }
 
-        public static string ReservedWordFromId(int id)
+        public static string? ReservedWordFromId(int id)
         {
             if (id >= KeywordMinId) {
-                return AbstractTokenizer.Instance.KeyWordFromId(id);
+                return Tokenizer.Instance.KeyWordFromId(id);
             }
             return "\'" + (char)id + "\'";
         }
 
-        public string String()
+        public string? String()
         {
             Debug.Assert(Type == TokenType.StringValue);
-            return AbstractTokenizer.Instance.StringFromId(Value);
+            return Tokenizer.Instance.StringFromId(Value);
         }
 
         public bool IsReservedWord(int id) { return Type == TokenType.ReservedWord && Value == id; }
 
-        public override string ToString()
+        public override string? ToString()
         {
-            switch(Type) {
-                case TokenType. ReservedWord:
+            switch (Type) {
+                case TokenType.ReservedWord:
                     if (Value == SourceReader.EndOfLine) {
                         return "end of line";
                     }
                     return ReservedWordFromId(Value);
                 case TokenType.Identifier:
-                    return AbstractTokenizer.Instance.IdentifierFromId(Value);
+                    return Tokenizer.Instance.IdentifierFromId(Value);
                 case TokenType.NumericValue:
                     return Value.ToString();
                 case TokenType.StringValue:

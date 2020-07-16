@@ -5,10 +5,10 @@ using System.Diagnostics;
 
 namespace Inu.Assembler.Z80
 {
-    class Assembler : AbstractAssembler
+    class Z80Assembler : Assembler
     {
         private const int InvalidRegisterCode = -1;
-        private readonly Tokenizer tokenizer = new Tokenizer();
+        private readonly Z80Tokenizer tokenizer = new Z80Tokenizer();
         protected override string ObjExt => ".o80";
 
         protected override byte[] ToBytes(int value)
@@ -62,9 +62,9 @@ namespace Inu.Assembler.Z80
         private bool InstructionWithoutOperand()
         {
             Token token = LastToken;
-            if (!InstructionsWithoutOperand.TryGetValue(token.Value, out int[] codes)) { return false; }
+            if (!InstructionsWithoutOperand.TryGetValue(token.Value, out var codes)) { return false; }
             NextToken();
-            foreach (var code in codes) {
+            foreach (int code in codes) {
                 WriteByte(code);
             }
             return true;
@@ -73,18 +73,17 @@ namespace Inu.Assembler.Z80
         private static readonly int[] SingleRegisters = { Keyword.B, Keyword.C, Keyword.D, Keyword.E, Keyword.H, Keyword.L, 0, Keyword.A };
         private int? SingleRegister()
         {
-            Token token = LastToken;
+            var token = LastToken;
             if (token.Type != TokenType.ReservedWord) { return null; }
 
-            int code = 0;
-            if (token.Type == TokenType.ReservedWord) {
-                foreach (var r in SingleRegisters) {
-                    if (r == token.Value) {
-                        NextToken();
-                        return code;
-                    }
-                    ++code;
+            var code = 0;
+            if (token.Type != TokenType.ReservedWord) return null;
+            foreach (var r in SingleRegisters) {
+                if (r == token.Value) {
+                    NextToken();
+                    return code;
                 }
+                ++code;
             }
             return null;
         }
@@ -92,51 +91,57 @@ namespace Inu.Assembler.Z80
         private int OffsetForIndex()
         {
             Token token = NextToken();
-            int? offset = ByteExpression();
-            if (offset == null) { offset = 0; }
+            var offset = ByteExpression() ?? 0;
             if (offset < -128 || offset > 127) {
-                ShowOutOfRange(token, offset.Value);
+                ShowOutOfRange(token, offset);
             }
-            return offset.Value;
+            return offset;
         }
         private bool IndexedAddress(out int registerId, out Address address)
         {
             registerId = 0;
-            address = null;
 
             Token token = LastToken;
-            if (token.Type != TokenType.ReservedWord) { return false; }
+            if (token.Type != TokenType.ReservedWord) {
+                address = Address.Default;
+                return false;
+            }
             switch (registerId = token.Value) {
                 case Keyword.Hl:
                 case Keyword.De:
-                case Keyword.Bc:
-                    NextToken();
-                    return true;
+                case Keyword.Bc: {
+                        NextToken();
+                        address = Address.Default;
+                        return true;
+                    }
                 case Keyword.Ix:
                 case Keyword.Iy:
                     int offset = OffsetForIndex();
                     address = new Address(AddressType.Const, offset);
                     return true;
-                default:
-                    break;
             }
+            address = Address.Default;
             return false;
         }
         private bool MemoryAddress(out int registerId, out Address address)
         {
             registerId = 0;
-            address = null;
 
             Token token = LastToken;
-            if (!token.IsReservedWord('(')) { return false; }
+            if (!token.IsReservedWord('(')) {
+                address = Address.Default;
+                return false;
+            }
             NextToken();
-            if (IndexedAddress(out registerId, out address)) {
-            }
-            else if ((address = Expression()) != null) {
-                registerId = 0;
-            }
-            else {
-                ShowSyntaxError();
+            if (!IndexedAddress(out registerId, out address)) {
+                var expression = Expression();
+                if ((expression) != null) {
+                    address = expression;
+                    registerId = 0;
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
             AcceptReservedWord(')');
             return true;
@@ -166,14 +171,12 @@ namespace Inu.Assembler.Z80
                 WriteByte(instruction);
                 return true;
             }
-            int? indexRegisterCode = IndexRegister();
-            if (indexRegisterCode != null) {
-                //	IX or IY
-                WriteByte(indexRegisterCode.Value);
-                WriteByte(instruction);
-                return true;
-            }
-            return false;
+            var indexRegisterCode = IndexRegister();
+            if (indexRegisterCode == null) return false;
+            //	IX or IY
+            WriteByte(indexRegisterCode.Value);
+            WriteByte(instruction);
+            return true;
         }
 
         /**
@@ -181,8 +184,8 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadToMemoryInstruction(Token leftToken, int indexId, Address address)
         {
-            Token rightToken = LastToken;
-            int? rightRegister = SingleRegister();
+            var rightToken = LastToken;
+            var rightRegister = SingleRegister();
             if (rightRegister == null) { return false; }
             switch (indexId) {
                 case Keyword.Hl:
@@ -221,9 +224,9 @@ namespace Inu.Assembler.Z80
         {
             Token token = LastToken;
             if (token.Type != TokenType.ReservedWord) { return null; }
-            var code = 0;
+            int code = 0;
             if (token.Type == TokenType.ReservedWord) {
-                foreach (var r in RegisterPairs) {
+                foreach (int r in RegisterPairs) {
                     if (r == token.Value) {
                         NextToken();
                         return code;
@@ -238,8 +241,8 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadRegisterPairToMemoryInstruction(Token leftToken, int indexId, Address address)
         {
-            Token rightToken = LastToken;
-            int? registerCode = RegisterPair();
+            var rightToken = LastToken;
+            var registerCode = RegisterPair();
             if (registerCode != null) {
                 if (rightToken.Value == Keyword.Hl) {
                     // LD (nn),HL
@@ -264,10 +267,9 @@ namespace Inu.Assembler.Z80
         }
         private bool LoadConstantByteToMemoryInstruction(Token leftToken, int indexId, Address address)
         {
-            Token token = LastToken;
-            int? value = ByteExpression();
+            var value = ByteExpression();
             if (value == null) { return false; }
-            int instruction = 0b00110110;
+            const int instruction = 0b00110110;
             switch (indexId) {
                 case Keyword.Hl:
                     //	LD (HL),n
@@ -295,8 +297,9 @@ namespace Inu.Assembler.Z80
         private bool LoadToMemoryInstruction()
         {
             Token leftToken = LastToken;
-            if (!MemoryAddress(out int indexId, out Address address)) { return false; }
+            if (!MemoryAddress(out var indexId, out var address)) { return false; }
             AcceptReservedWord(',');
+            Debug.Assert(address != null);
             return
                 LoadToMemoryInstruction(leftToken, indexId, address) ||
                 LoadRegisterPairToMemoryInstruction(leftToken, indexId, address) ||
@@ -307,7 +310,8 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadRegisterFromMemoryInstruction(Token leftToken, int leftRegister)
         {
-            if (!MemoryAddress(out int indexId, out Address address)) { return false; }
+            if (!MemoryAddress(out int indexId, out var address)) { return false; }
+            Debug.Assert(address != null);
             switch (indexId) {
                 case Keyword.Hl:
                     //	LD r,(HL)
@@ -344,10 +348,10 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadRegisterFromRegisterInstruction(int leftRegister)
         {
-            int? rightRegister = SingleRegister();
+            var rightRegister = SingleRegister();
             if (rightRegister == null) { return false; }
             //	LD r1,r2
-            int opeCode = 0b01000000 | (leftRegister << 3) | rightRegister.Value;
+            var opeCode = 0b01000000 | (leftRegister << 3) | rightRegister.Value;
             WriteByte(opeCode);
             return true;
         }
@@ -395,8 +399,8 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadRegisterInstruction()
         {
-            Token leftToken = LastToken;
-            int? leftRegister = SingleRegister();
+            var leftToken = LastToken;
+            var leftRegister = SingleRegister();
             if (leftRegister == null) { return false; }
             AcceptReservedWord(',');
 
@@ -412,19 +416,28 @@ namespace Inu.Assembler.Z80
         private bool LoadStackPointerFromRegister(Token leftRegister)
         {
             if (leftRegister.Value != Keyword.Sp) { return false; }
-            Token rightToken = LastToken;
-            if (rightToken.Type != TokenType.ReservedWord) { return false; }
-            if (rightToken.Value == Keyword.Hl) {
-                NextToken();
-                //	LD SP,HL
-                WriteByte(0b11111001);
+
+            var rightToken = LastToken;
+            if (rightToken.Type == TokenType.ReservedWord) {
+                if (rightToken.Value == Keyword.Hl) {
+                    NextToken();
+                    //	LD SP,HL
+                    WriteByte(0b11111001);
+                }
+                else {
+                    var registerCode = IndexRegister();
+                    if (registerCode != null) {
+                        //	LD SP,IX or IY
+                        WriteByte(registerCode.Value);
+                        WriteByte(0b11111001);
+                    }
+                    else {
+                        ShowSyntaxError(rightToken);
+                    }
+                }
             }
             else {
-                int? registerCode = IndexRegister();
-                if (registerCode == null) { return false; }
-                //	LD SP,IX or IY
-                WriteByte(registerCode.Value);
-                WriteByte(0b11111001);
+                ShowSyntaxError(rightToken);
             }
             return true;
         }
@@ -438,8 +451,8 @@ namespace Inu.Assembler.Z80
             if (leftRegister == null) { return false; }
             AcceptReservedWord(',');
             if (LoadStackPointerFromRegister(leftToken)) { return true; }
-            var rightToken = LastToken;
-            Address value = Expression();
+            Token rightToken = LastToken;
+            var value = Expression();
             if (value == null) { return false; }
             if (value.Parenthesized) {
                 if (leftToken.Value == Keyword.Hl) {
@@ -466,13 +479,12 @@ namespace Inu.Assembler.Z80
          */
         private bool LoadIndexRegisterInstruction()
         {
-            Token leftToken = LastToken;
-            int? leftRegister = IndexRegister();
+            var leftRegister = IndexRegister();
             if (leftRegister == null) { return false; }
             AcceptReservedWord(',');
-            Token rightToken = LastToken;
-            Address value = Expression();
-            if (value == null) { return false; }
+            var rightToken = LastToken;
+            var value = Expression();
+            if (value == null) return true;
             if (value.Parenthesized) {
                 // LD IX or IY,(nn)
                 WriteByte(leftRegister.Value);
@@ -499,7 +511,7 @@ namespace Inu.Assembler.Z80
             if (leftToken.Type != TokenType.ReservedWord) { return false; }
             if (!SpecialRegisterCodes.TryGetValue(leftToken.Value, out int instruction)) { return false; }
             NextToken();
-            var rightToken = AcceptReservedWord(',');
+            Token rightToken = AcceptReservedWord(',');
             if (rightToken.Type != TokenType.ReservedWord || rightToken.Value != Keyword.A) {
                 ShowSyntaxError();
             }
@@ -531,53 +543,51 @@ namespace Inu.Assembler.Z80
         private void ExchangeInstruction()
         {
             var leftToken = NextToken();
-            int? leftRegisterCode = RegisterPair();
+            var leftRegisterCode = RegisterPair();
             if (leftRegisterCode != null) {
                 if (leftToken.Value != Keyword.De) { ShowInvalidRegister(leftToken); }
                 var rightToken = AcceptReservedWord(',');
-                int? rightRegisterCode = RegisterPair();
+                var rightRegisterCode = RegisterPair();
                 if (rightRegisterCode != null) {
                     if (rightToken.Value != Keyword.Hl) { ShowInvalidRegister(rightToken); }
                     // EX DE,HL
                     WriteByte(0b11101011);
-                    return;
                 }
-                ShowSyntaxError();
-                return;
+                else {
+                    ShowSyntaxError();
+                }
             }
-            if (leftToken.IsReservedWord(Keyword.Af)) {
+            else if (leftToken.IsReservedWord(Keyword.Af)) {
                 NextToken();
                 var rightToken = AcceptReservedWord(',');
                 if (!rightToken.IsReservedWord(Keyword.AfX)) { ShowSyntaxError(); }
                 NextToken();
                 //	EX AF,AF'
                 WriteByte(0b00001000);
-                return;
             }
-            if (leftToken.IsReservedWord('(')) {
+            else if (leftToken.IsReservedWord('(')) {
                 leftToken = NextToken();
                 leftRegisterCode = RegisterPair();
-                if (leftRegisterCode != null) {
-                    if (leftToken.Value != Keyword.Sp) { ShowInvalidRegister(leftToken); }
-                    AcceptReservedWord(')');
-                    var rightToken = AcceptReservedWord(',');
-                    int? rightRegisterCode = RegisterPair();
-                    if (rightRegisterCode != null) {
-                        if (rightToken.Value != Keyword.Hl) { ShowInvalidRegister(rightToken); }
-                        //	EX (SP),HL
-                        WriteByte(0b11100011);
-                        return;
-                    }
-                    rightRegisterCode = IndexRegister();
-                    if (rightRegisterCode != null) {
-                        //	EX (SP),HL IX or IY
-                        WriteByte(rightRegisterCode.Value);
-                        WriteByte(0b11100011);
-                        return;
-                    }
+                if (leftRegisterCode == null) return;
+                if (leftToken.Value != Keyword.Sp) { ShowInvalidRegister(leftToken); }
+                AcceptReservedWord(')');
+                var rightToken = AcceptReservedWord(',');
+                var rightRegisterCode = RegisterPair();
+                if (rightRegisterCode != null) {
+                    if (rightToken.Value != Keyword.Hl) { ShowInvalidRegister(rightToken); }
+                    //	EX (SP),HL
+                    WriteByte(0b11100011);
+                    return;
                 }
+                rightRegisterCode = IndexRegister();
+                if (rightRegisterCode == null) return;
+                //	EX (SP),HL IX or IY
+                WriteByte(rightRegisterCode.Value);
+                WriteByte(0b11100011);
             }
-            ShowSyntaxError();
+            else {
+                ShowSyntaxError();
+            }
         }
         /**
          * "PUSH ?".
@@ -603,7 +613,7 @@ namespace Inu.Assembler.Z80
                 }
             }
             {
-                int? registerCode = IndexRegister();
+                var registerCode = IndexRegister();
                 if (registerCode != null) {
                     //	PUSH IX or IY
                     WriteByte(registerCode.Value);
@@ -665,7 +675,7 @@ namespace Inu.Assembler.Z80
 
             NextToken();
             if (LastToken.IsReservedWord('(')) {
-                var operand = NextToken();
+                Token operand = NextToken();
                 if (IndexedAddress(out int registerId, out Address value)) {
                     switch (registerId) {
                         case Keyword.Hl:
@@ -692,7 +702,7 @@ namespace Inu.Assembler.Z80
                 AcceptReservedWord(')');
                 return true;
             }
-            int? registerCode = SingleRegister();
+            var registerCode = SingleRegister();
             if (registerCode != null) {
                 WriteByte(0b11001011);
                 WriteByte(instruction | registerCode.Value);
@@ -703,13 +713,11 @@ namespace Inu.Assembler.Z80
         }
         private bool ConstByteOperationInstruction(int instruction)
         {
-            int? value = ByteExpression();
-            if (value != null) {
-                WriteByte(instruction);
-                WriteByte(value.Value);
-                return true;
-            }
-            return false;
+            var value = ByteExpression();
+            if (value == null) return false;
+            WriteByte(instruction);
+            WriteByte(value.Value);
+            return true;
         }
         private bool ByteOperationInstruction(int instruction, int shiftCount = 0)
         {
@@ -739,12 +747,10 @@ namespace Inu.Assembler.Z80
                 AcceptReservedWord(')');
                 return true;
             }
-            int? registerCode = SingleRegister();
-            if (registerCode != null) {
-                WriteByte(instruction | (registerCode.Value << shiftCount));
-                return true;
-            }
-            return false;
+            var registerCode = SingleRegister();
+            if (registerCode == null) return false;
+            WriteByte(instruction | (registerCode.Value << shiftCount));
+            return true;
         }
         /**
          * "SUB,AND,OR,XOR or CP".
@@ -758,7 +764,7 @@ namespace Inu.Assembler.Z80
         };
         private bool ByteOperationInstruction()
         {
-            if (!ByteOperationInstructions.TryGetValue(LastToken.Value, out int[] instructions)) { return false; }
+            if (!ByteOperationInstructions.TryGetValue(LastToken.Value, out var instructions)) { return false; }
 
             NextToken();
             if (ByteOperationInstruction(instructions[0], 0)) { return true; }
@@ -780,11 +786,11 @@ namespace Inu.Assembler.Z80
                 if (ConstByteOperationInstruction(0b11000110)) { return; }
             }
             else {
-                int? leftRegisterCode = RegisterPair();
+                var leftRegisterCode = RegisterPair();
                 if (leftRegisterCode != null) {
                     if (leftOperand.Value != Keyword.Hl) { ShowInvalidRegister(leftOperand); }
                     AcceptReservedWord(',');
-                    int? rightRegisterCode = RegisterPair();
+                    var rightRegisterCode = RegisterPair();
                     if (rightRegisterCode != null) {
                         //	ADD HL, rp
                         WriteByte(0b00001001 | (rightRegisterCode.Value << 4));
@@ -794,7 +800,7 @@ namespace Inu.Assembler.Z80
                 leftRegisterCode = IndexRegister();
                 if (leftRegisterCode != null) {
                     AcceptReservedWord(',');
-                    int? rightRegisterCode = RegisterPair();
+                    var rightRegisterCode = RegisterPair();
                     if (rightRegisterCode != null) {
                         //	ADD IX or IY, rp
                         WriteByte(leftRegisterCode.Value);
@@ -814,7 +820,7 @@ namespace Inu.Assembler.Z80
         };
         private bool AddOrSubtractWithCarryInstruction()
         {
-            if (!AddOrSubtractWithCarryInstructions.TryGetValue(LastToken.Value, out int[] instructions)) { return false; }
+            if (!AddOrSubtractWithCarryInstructions.TryGetValue(LastToken.Value, out var instructions)) { return false; }
 
             Token leftOperand = NextToken();
             if (leftOperand.IsReservedWord(Keyword.A)) {
@@ -825,11 +831,11 @@ namespace Inu.Assembler.Z80
                 if (ConstByteOperationInstruction(instructions[1])) { return true; }
             }
             else {
-                int? leftRegisterCode = RegisterPair();
+                var leftRegisterCode = RegisterPair();
                 if (leftRegisterCode != null) {
                     if (leftOperand.Value != Keyword.Hl) { ShowInvalidRegister(leftOperand); }
                     AcceptReservedWord(',');
-                    int? rightRegisterCode = RegisterPair();
+                    var rightRegisterCode = RegisterPair();
                     if (rightRegisterCode != null) {
                         //	??? HL, rp
                         WriteByte(0b11101101);
@@ -850,25 +856,27 @@ namespace Inu.Assembler.Z80
         };
         private bool InclementOrDecrementInstruction()
         {
-            if (!InclementOrDecrementInstructions.TryGetValue(LastToken.Value, out int[] instructions)) { return false; }
+            if (!InclementOrDecrementInstructions.TryGetValue(LastToken.Value, out var instructions)) { return false; }
 
-            Token operand = NextToken();
+            var operand = NextToken();
             if (ByteOperationInstruction(instructions[0], 3)) { return true; }
 
-            int? registerCode = RegisterPair();
+            var registerCode = RegisterPair();
             if (registerCode != null) {
                 // INC or DEC rp
                 WriteByte(instructions[1] | (registerCode.Value << 4));
-                return true;
             }
-            registerCode = IndexRegister();
-            if (registerCode != null) {
-                // INC or DEC IX or IY
-                WriteByte(registerCode.Value);
-                WriteByte(instructions[1] | (0b10 << 4));
-                return true;
+            else {
+                registerCode = IndexRegister();
+                if (registerCode != null) {
+                    // INC or DEC IX or IY
+                    WriteByte(registerCode.Value);
+                    WriteByte(instructions[1] | (0b10 << 4));
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
-            ShowSyntaxError();
             return true;
         }
         /**
@@ -884,36 +892,43 @@ namespace Inu.Assembler.Z80
             if (!BitOperationInstructions.TryGetValue(LastToken.Value, out int instruction)) { return false; }
 
             var leftOperand = NextToken();
-            int? bitNumber = ByteExpression();
-            if (bitNumber == null) { ShowSyntaxError(); }
-            if (bitNumber < 0 || bitNumber >= 8) { ShowOutOfRange(leftOperand, bitNumber.Value); }
-            var rightOperand = AcceptReservedWord(',');
-            int? registerCode = SingleRegister();
-            if (registerCode != null) {
-                //	??? b,r
-                WriteByte(0b11001011);
-                WriteByte(instruction | (bitNumber.Value << 3) | registerCode.Value);
-                return true;
-            }
-            if (MemoryAddress(out int registerId, out Address offset)) {
-                switch (registerId) {
-                    case Keyword.Hl:
-                        //	??? b,(HL)
-                        WriteByte(0b11001011);
-                        WriteByte(instruction | (bitNumber.Value << 3) | 0b110);
-                        return true;
-                    case Keyword.Ix:
-                    case Keyword.Iy:
-                        //	??? b,(IX or IY+d)
-                        WriteByte(IndexRegisterCodes[registerId]);
-                        WriteByte(0b11001011);
-                        WriteByte(offset.Value);
-                        WriteByte(instruction | (bitNumber.Value << 3) | 0b110);
-                        return true;
-                    default:
-                        break;
+            var bitNumber = ByteExpression();
+            if (bitNumber != null) {
+                if (bitNumber < 0 || bitNumber >= 8) {
+                    ShowOutOfRange(leftOperand, bitNumber.Value);
+                }
+
+                AcceptReservedWord(',');
+                var registerCode = SingleRegister();
+                if (registerCode != null) {
+                    //	??? b,r
+                    WriteByte(0b11001011);
+                    WriteByte(instruction | (bitNumber.Value << 3) | registerCode.Value);
+                    return true;
+                }
+
+                if (MemoryAddress(out int registerId, out var offset)) {
+                    switch (registerId) {
+                        case Keyword.Hl:
+                            //	??? b,(HL)
+                            WriteByte(0b11001011);
+                            WriteByte(instruction | (bitNumber.Value << 3) | 0b110);
+                            return true;
+                        case Keyword.Ix:
+                        case Keyword.Iy:
+                            //	??? b,(IX or IY+d)
+                            WriteByte(IndexRegisterCodes[registerId]);
+                            WriteByte(0b11001011);
+                            WriteByte(offset.Value);
+                            WriteByte(instruction | (bitNumber.Value << 3) | 0b110);
+                            return true;
+                    }
                 }
             }
+            else {
+                ShowSyntaxError();
+            }
+
             ShowSyntaxError();
             return true;
         }
@@ -923,7 +938,7 @@ namespace Inu.Assembler.Z80
             if (token.Type != TokenType.ReservedWord) { return null; }
             int code = 0;
             if (token.Type == TokenType.ReservedWord) {
-                foreach (var r in ConditionCodes) {
+                foreach (int r in ConditionCodes) {
                     if (r == token.Value) {
                         return code;
                     }
@@ -934,9 +949,10 @@ namespace Inu.Assembler.Z80
         }
         int? ConditionCode()
         {
-            int? conditionCode = ConditionCode(LastToken);
-            if (conditionCode == null) { return null; }
-            NextToken();
+            var conditionCode = ConditionCode(LastToken);
+            if (conditionCode != null) {
+                NextToken();
+            }
             return conditionCode;
         }
         /**
@@ -944,11 +960,11 @@ namespace Inu.Assembler.Z80
          */
         private void JumpInstruction()
         {
-            Token operand = NextToken();
+            var operand = NextToken();
 
             if (operand.IsReservedWord('(')) {
                 operand = NextToken();
-                int? registerCode = RegisterPair();
+                var registerCode = RegisterPair();
                 if (registerCode != null) {
                     if (!operand.IsReservedWord(Keyword.Hl)) { ShowInvalidRegister(operand); }
                     //	JP (HL)
@@ -962,10 +978,10 @@ namespace Inu.Assembler.Z80
                 AcceptReservedWord(')');
                 return;
             }
-            int? conditionCode = ConditionCode();
+            var conditionCode = ConditionCode();
             if (conditionCode != null) {
                 operand = AcceptReservedWord(',');
-                Address address = Expression();
+                var address = Expression();
                 if (address == null) {
                     ShowSyntaxError();
                     address = new Address(0);
@@ -976,7 +992,7 @@ namespace Inu.Assembler.Z80
                 return;
             }
             {
-                Address address = Expression();
+                var address = Expression();
                 if (address != null) {
                     //	JP nn
                     WriteByte(0b11000011);
@@ -1022,13 +1038,14 @@ namespace Inu.Assembler.Z80
                 instruction = 0b00011000;
             }
 
-            if (RelativeOffset(out Address address, out int offset)) {
+            if (RelativeOffset(out var address, out int offset)) {
                 // JR
                 WriteByte(instruction.Value);
                 WriteByte(offset);
             }
             else {
-                int? conditionCode = ConditionCode(condition);
+                Debug.Assert(address != null);
+                var conditionCode = ConditionCode(condition);
                 if (conditionCode != null) {
                     // JP cc,nn
                     WriteByte(0b11000010 | (conditionCode.Value << 3));
@@ -1047,12 +1064,13 @@ namespace Inu.Assembler.Z80
         private void DecrementJumpRelativeInstruction()
         {
             Token operand = NextToken();
-            if (RelativeOffset(out Address address, out int offset)) {
+            if (RelativeOffset(out var address, out int offset)) {
                 // DJNZ e
                 WriteByte(0b00010000);
                 WriteByte(offset);
             }
             else {
+                Debug.Assert(address != null);
                 // DEC B
                 WriteByte(0b00000101);
                 // JP NZ, nn
@@ -1076,13 +1094,12 @@ namespace Inu.Assembler.Z80
                     }
                 }
             }
-            int? conditionCode = ConditionCode(condition);
-            if (conditionCode != null) {
-                NextToken();
-                // JP cc,else
-                WriteByte(0b11000010 | (conditionCode.Value << 3));
-                WriteWord(LastToken, address);
-            }
+            var conditionCode = ConditionCode(condition);
+            if (conditionCode == null) return;
+            NextToken();
+            // JP cc,else
+            WriteByte(0b11000010 | (conditionCode.Value << 3));
+            WriteWord(LastToken, address);
         }
         private void NegatedConditionalJump(Address address)
         {
@@ -1099,14 +1116,13 @@ namespace Inu.Assembler.Z80
                     return;
                 }
             }
-            int? conditionCode = ConditionCode(condition);
-            if (conditionCode != null) {
-                NextToken();
-                conditionCode ^= 1; // negate condition
-                                    // JP !cc,else
-                WriteByte(0b11000010 | (conditionCode.Value << 3));
-                WriteWord(LastToken, address);
-            }
+            var conditionCode = ConditionCode(condition);
+            if (conditionCode == null) return;
+            NextToken();
+            conditionCode ^= 1; // negate condition
+            // JP !cc,else
+            WriteByte(0b11000010 | (conditionCode.Value << 3));
+            WriteWord(LastToken, address);
         }
         private void UnconditionalJump(Address address)
         {
@@ -1135,36 +1151,32 @@ namespace Inu.Assembler.Z80
         }
         private void ElseStatement()
         {
-            IfBlock block = LastBlock() as IfBlock;
-            if (block == null) {
-                ShowNoStatementError(LastToken, "IF");
-            }
-            else {
+            if (LastBlock() is IfBlock block) {
                 if (block.ElseId <= 0) {
                     ShowError(LastToken.Position, "Multiple ELSE statement.");
                 }
+
                 Address address = SymbolAddress(block.EndId);
                 UnconditionalJump(address);
                 DefineSymbol(block.ConsumeElse(), CurrentAddress);
             }
+            else {
+                ShowNoStatementError(LastToken, "IF");
+            }
             NextToken();
         }
+
         private void ElseIfStatement()
         {
             ElseStatement();
-            IfBlock block = LastBlock() as IfBlock;
-            if (block == null) { return; }
+            if (!(LastBlock() is IfBlock block)) { return; }
             Debug.Assert(block.ElseId == Block.InvalidId);
             block.ElseId = AutoLabel();
             StartIf(block);
         }
         private void EndIfStatement()
         {
-            var block = LastBlock() as IfBlock;
-            if (block == null) {
-                ShowNoStatementError(LastToken, "IF");
-            }
-            else {
+            if (LastBlock() is IfBlock block) {
                 if (block.ElseId <= 0) {
                     DefineSymbol(block.EndId, CurrentAddress);
                 }
@@ -1173,8 +1185,12 @@ namespace Inu.Assembler.Z80
                 }
                 EndBlock();
             }
+            else {
+                ShowNoStatementError(LastToken, "IF");
+            }
             NextToken();
         }
+
         private void DoStatement()
         {
             WhileBlock block = NewWhileBlock();
@@ -1184,36 +1200,28 @@ namespace Inu.Assembler.Z80
         private void WhileStatement()
         {
             NextToken();
-            WhileBlock block = LastBlock() as WhileBlock;
-            if (block == null) {
+            if (!(LastBlock() is WhileBlock block)) {
                 ShowNoStatementError(LastToken, "WHILE");
                 NextToken();
                 return;
             }
 
-            Address repeatAddress = SymbolAddress(block.RepeatId);
-            int next;
-            int? instruction = JumpRelativeInstructionCode(LastToken);
-            if (instruction != null) {
-                next = 0;
-            }
-            else {
-                next = 1;
-            }
+            var repeatAddress = SymbolAddress(block.RepeatId);
+            var instruction = JumpRelativeInstructionCode(LastToken);
+            var next = instruction != null ? 0 : 1;
             if (repeatAddress.Type == CurrentSegment.Type && (RelativeOffset(repeatAddress)) <= next) {
-                Address address = SymbolAddress(block.BeginId);
+                var address = SymbolAddress(block.BeginId);
                 ConditionalJump(address);
                 block.EraseEndId();
             }
             else {
-                Address address = SymbolAddress(block.EndId);
+                var address = SymbolAddress(block.EndId);
                 NegatedConditionalJump(address);
             }
         }
         private void WEndStatement()
         {
-            WhileBlock block = LastBlock() as WhileBlock;
-            if (block == null) {
+            if (!(LastBlock() is WhileBlock block)) {
                 ShowNoStatementError(LastToken, "WHILE");
             }
             else {
@@ -1229,15 +1237,14 @@ namespace Inu.Assembler.Z80
         }
         private void WNzStatement()
         {
-            WhileBlock block = LastBlock() as WhileBlock;
-            if (block == null) {
+            if (!(LastBlock() is WhileBlock block)) {
                 ShowNoStatementError(LastToken, "WHILE");
             }
             else {
                 if (block.EndId <= 0) {
                     ShowError(LastToken.Position, "WHILE and WNZ cannot be used in the same syntax.");
                 }
-                Address address = SymbolAddress(block.BeginId);
+                var address = SymbolAddress(block.BeginId);
                 EndBlock();
                 if (!address.IsUndefined()) {
                     int offset = RelativeOffset(address);
@@ -1254,7 +1261,7 @@ namespace Inu.Assembler.Z80
                 WriteByte(0b11000010);
                 WriteWord(LastToken, address);
             }
-        exit:
+            exit:
             NextToken();
         }
         /**
@@ -1264,26 +1271,30 @@ namespace Inu.Assembler.Z80
         {
             Token operand = NextToken();
 
-            int? conditionCode = ConditionCode();
+            var conditionCode = ConditionCode();
             if (conditionCode != null) {
                 operand = AcceptReservedWord(',');
-                Address address = Expression();
-                if (address == null) { goto error; }
-                // CALL cc,nn
-                WriteByte(0b11000100 | (conditionCode.Value << 3));
-                WriteWord(operand, address);
-                return;
+                var address = Expression();
+                if (address != null) {
+                    // CALL cc,nn
+                    WriteByte(0b11000100 | (conditionCode.Value << 3));
+                    WriteWord(operand, address);
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
-            {
-                Address address = Expression();
-                if (address == null) { goto error; }
-                //	CALL nn
-                WriteByte(0b11001101);
-                WriteWord(operand, address);
-                return;
+            else {
+                var address = Expression();
+                if (address != null) {
+                    //	CALL nn
+                    WriteByte(0b11001101);
+                    WriteWord(operand, address);
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
-        error:
-            ShowSyntaxError();
         }
         /**
          * "RET".
@@ -1291,28 +1302,34 @@ namespace Inu.Assembler.Z80
         private void ReturnInstruction()
         {
             NextToken();
-            int? conditionCode = ConditionCode();
+            var conditionCode = ConditionCode();
             if (conditionCode != null) {
                 // RET cc
                 WriteByte(0b11000000 | (conditionCode.Value << 3));
-                return;
             }
-            //	RET
-            WriteByte(0b11001001);
+            else {
+                //	RET
+                WriteByte(0b11001001);
+            }
         }
         /**
          * "RST".
          */
         private void RestartInstruction()
         {
-            Token operand = NextToken();
-            int? value = ByteExpression();
-            if (value == null) { ShowSyntaxError(); }
-            else {
-                if ((value & 0b11000111) != 0) { ShowOutOfRange(operand, value.Value); }
+            var operand = NextToken();
+            var value = ByteExpression();
+            if (value != null) {
+                if ((value & 0b11000111) != 0) {
+                    ShowOutOfRange(operand, value.Value);
+                }
+
                 value &= 0b00111000;
                 // RST p
                 WriteByte(0b11000111 | value.Value);
+            }
+            else {
+                ShowSyntaxError();
             }
         }
         /**
@@ -1321,8 +1338,8 @@ namespace Inu.Assembler.Z80
         private static readonly int[] InterruptModeInstructions = { 0b01000110, 0b01010110, 0b01011110 };
         private void InterruptModeInstruction()
         {
-            Token operand = NextToken();
-            int? value = ByteExpression();
+            var operand = NextToken();
+            var value = ByteExpression();
             if (value != null) {
                 if (value < 0 || value >= InterruptModeInstructions.Length) { ShowOutOfRange(operand, value.Value); }
                 //	IM ?
@@ -1336,27 +1353,42 @@ namespace Inu.Assembler.Z80
          */
         private void InputInstruction()
         {
-            Token leftOperand = NextToken();
-            int? leftRegisterCode = SingleRegister();
-            if (leftRegisterCode == null) { ShowSyntaxError(); }
-            AcceptReservedWord(',');
-            var rightOperand = AcceptReservedWord('(');
-            int? rightRegisterCode = SingleRegister();
-            if (rightRegisterCode != null) {
-                if (rightOperand.Value != Keyword.C) { ShowInvalidRegister(rightOperand); }
-                //	IN r,(C)
-                WriteByte(0b11101101);
-                WriteByte(0b01000000 | (leftRegisterCode.Value << 3));
+            var leftOperand = NextToken();
+            var leftRegisterCode = SingleRegister();
+            if (leftRegisterCode != null) {
+                AcceptReservedWord(',');
+                var rightOperand = AcceptReservedWord('(');
+                var rightRegisterCode = SingleRegister();
+                if (rightRegisterCode != null) {
+                    if (rightOperand.Value != Keyword.C) {
+                        ShowInvalidRegister(rightOperand);
+                    }
+
+                    //	IN r,(C)
+                    WriteByte(0b11101101);
+                    WriteByte(0b01000000 | (leftRegisterCode.Value << 3));
+                }
+                else {
+                    if (leftOperand.Value != Keyword.A) {
+                        ShowInvalidRegister(leftOperand);
+                    }
+
+                    var value = ByteExpression();
+                    if (value != null) {
+                        //	IN a,(n)
+                        WriteByte(0b11011011);
+                        WriteByte(value.Value);
+                    }
+                    else {
+                        ShowSyntaxError();
+                    }
+                }
+
+                AcceptReservedWord(')');
             }
             else {
-                if (leftOperand.Value != Keyword.A) { ShowInvalidRegister(leftOperand); }
-                int? value = ByteExpression();
-                if (value == null) { ShowSyntaxError(); }
-                //	IN a,(n)
-                WriteByte(0b11011011);
-                WriteByte(value.Value);
+                ShowSyntaxError();
             }
-            AcceptReservedWord(')');
         }
         /**
          * "OUT".
@@ -1366,54 +1398,70 @@ namespace Inu.Assembler.Z80
             NextToken();
             var leftOperand = AcceptReservedWord('(');
 
-            int? leftRegisterCode = SingleRegister();
+            var leftRegisterCode = SingleRegister();
             if (leftRegisterCode != null) {
                 if (leftOperand.Value != Keyword.C) { ShowInvalidRegister(leftOperand); }
                 AcceptReservedWord(')');
                 AcceptReservedWord(',');
-                int? rightRegisterCode = SingleRegister();
-                if (rightRegisterCode == null) { ShowSyntaxError(); }
-                //	OUT (C),r
-                WriteByte(0b11101101);
-                WriteByte(0b01000001 | (rightRegisterCode.Value << 3));
+                var rightRegisterCode = SingleRegister();
+                if (rightRegisterCode != null) {
+                    //	OUT (C),r
+                    WriteByte(0b11101101);
+                    WriteByte(0b01000001 | (rightRegisterCode.Value << 3));
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
             else {
-                int? value = ByteExpression();
-                if (value == null) { ShowSyntaxError(); }
-                AcceptReservedWord(')');
-                var rightOperand = AcceptReservedWord(',');
-                int? rightRegisterCode = SingleRegister();
-                if (rightRegisterCode == null) { ShowSyntaxError(); }
-                if (rightOperand.Value != Keyword.A) { ShowInvalidRegister(rightOperand); }
-                //	OUT (n),a
-                WriteByte(0b11010011);
-                WriteByte(value.Value);
+                var value = ByteExpression();
+                if (value != null) {
+                    AcceptReservedWord(')');
+                    var rightOperand = AcceptReservedWord(',');
+                    var rightRegisterCode = SingleRegister();
+                    if (rightRegisterCode != null) {
+                        if (rightOperand.Value == Keyword.A) {
+                            //	OUT (n),a
+                            WriteByte(0b11010011);
+                            WriteByte(value.Value);
+                        }
+                        else {
+                            ShowInvalidRegister(rightOperand);
+                        }
+                    }
+                    else {
+                        ShowSyntaxError();
+                    }
+                }
+                else {
+                    ShowSyntaxError();
+                }
             }
         }
 
-        private static readonly Dictionary<int, Action<Assembler>> Actions = new Dictionary<int, Action<Assembler>> {
-            {Keyword.Ld, (Assembler a)=>{a.LoadInstruction(); }    },
-            {Keyword.Ex, (Assembler a)=>{a.ExchangeInstruction(); } },
-            {Keyword.Push, (Assembler a)=>{a.PushInstruction(); }},
-            {Keyword.Pop, (Assembler a)=>{a.PopInstruction(); }},
-            {Keyword.Add, (Assembler a)=>{a.AddInstruction(); }},
-            {Keyword.Jp, (Assembler a)=>{a.JumpInstruction(); }},
-            {Keyword.Jr, (Assembler a)=>{a.JumpRelativeInstruction(); }},
-            {Keyword.DjNz, (Assembler a)=>{a.DecrementJumpRelativeInstruction(); }},
-            {Keyword.Call, (Assembler a)=>{a.CallInstruction(); }},
-            {Keyword.Ret, (Assembler a)=>{a.ReturnInstruction(); }},
-            {Keyword.Rst, (Assembler a)=>{a.RestartInstruction(); }},
-            {Keyword.Im, (Assembler a)=>{a.InterruptModeInstruction(); }},
-            {Keyword.In, (Assembler a)=>{a.InputInstruction(); }},
-            {Keyword.Out,(Assembler a)=>{a.OutputInstruction(); }},
-            {Keyword.If, (Assembler a)=>{a.IfStatement(); }},
-            {Keyword.Else, (Assembler a)=>{a.ElseStatement(); }},
-            {Keyword.EndIf,(Assembler a)=>{a.EndIfStatement(); }},
-            {Keyword.ElseIf, (Assembler a)=>{a.ElseIfStatement(); }},
-            {Keyword.Do, (Assembler a)=>{a.DoStatement(); }},
-            {Keyword.While, (Assembler a)=>{a.WhileStatement(); }},
-            {Keyword.WEnd, (Assembler a)=>{a.WEndStatement(); }},
-            {Keyword.DWNz, (Assembler a)=>{a.WNzStatement(); }},
+        private static readonly Dictionary<int, Action<Z80Assembler>> Actions = new Dictionary<int, Action<Z80Assembler>> {
+            {Keyword.Ld, (Z80Assembler a)=>{a.LoadInstruction(); }    },
+            {Keyword.Ex, (Z80Assembler a)=>{a.ExchangeInstruction(); } },
+            {Keyword.Push, (Z80Assembler a)=>{a.PushInstruction(); }},
+            {Keyword.Pop, (Z80Assembler a)=>{a.PopInstruction(); }},
+            {Keyword.Add, (Z80Assembler a)=>{a.AddInstruction(); }},
+            {Keyword.Jp, (Z80Assembler a)=>{a.JumpInstruction(); }},
+            {Keyword.Jr, (Z80Assembler a)=>{a.JumpRelativeInstruction(); }},
+            {Keyword.DjNz, (Z80Assembler a)=>{a.DecrementJumpRelativeInstruction(); }},
+            {Keyword.Call, (Z80Assembler a)=>{a.CallInstruction(); }},
+            {Keyword.Ret, (Z80Assembler a)=>{a.ReturnInstruction(); }},
+            {Keyword.Rst, (Z80Assembler a)=>{a.RestartInstruction(); }},
+            {Keyword.Im, (Z80Assembler a)=>{a.InterruptModeInstruction(); }},
+            {Keyword.In, (Z80Assembler a)=>{a.InputInstruction(); }},
+            {Keyword.Out,(Z80Assembler a)=>{a.OutputInstruction(); }},
+            {Keyword.If, (Z80Assembler a)=>{a.IfStatement(); }},
+            {Keyword.Else, (Z80Assembler a)=>{a.ElseStatement(); }},
+            {Keyword.EndIf,(Z80Assembler a)=>{a.EndIfStatement(); }},
+            {Keyword.ElseIf, (Z80Assembler a)=>{a.ElseIfStatement(); }},
+            {Keyword.Do, (Z80Assembler a)=>{a.DoStatement(); }},
+            {Keyword.While, (Z80Assembler a)=>{a.WhileStatement(); }},
+            {Keyword.WEnd, (Z80Assembler a)=>{a.WEndStatement(); }},
+            {Keyword.DWNz, (Z80Assembler a)=>{a.WNzStatement(); }},
         };
         protected override bool Instruction()
         {
@@ -1425,7 +1473,7 @@ namespace Inu.Assembler.Z80
             if (BitOperationInstruction()) { return true; }
 
             Token token = LastToken;
-            if (!Actions.TryGetValue(token.Value, out Action<Assembler> action)) { return false; }
+            if (!Actions.TryGetValue(token.Value, out var action)) { return false; }
             action(this);
             return true;
         }

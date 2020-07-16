@@ -2,7 +2,7 @@
   "profiles": {
     "ra80": {
       "commandName": "Project",
-      "commandLineArgs": "\"D:\\MSX\\ra80\\z80test.asm\""
+      "commandLineArgs": "D:\\MSX\\PC80\\Neuras80\\Status.asm"
     }
   }
 }

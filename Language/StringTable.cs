@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 
 namespace Inu.Language
@@ -11,20 +10,17 @@ namespace Inu.Language
 
         private class Element : IComparable<Element>
         {
-            public int Id { get; private set; }
-            public string Name { get; private set; }
+            public readonly int Id;
+            public readonly string Name;
             public Element(int id, string name)
             {
                 Id = id;
                 Name = name;
             }
 
-            public int CompareTo(Element other)
-            {
-                return Name.CompareTo(other.Name);
-            }
+            public int CompareTo(Element other) => Name.CompareTo(other.Name);
         }
-        private int minId;
+        private readonly int minId;
         private readonly List<Element> elements = new List<Element>();
 
         public StringTable(int minId)
@@ -43,7 +39,7 @@ namespace Inu.Language
 
         public int Add(string name)
         {
-            int index = elements.FindIndex((Element e) => { return e.Name.CompareTo(name) >= 0; });
+            int index = elements.FindIndex((Element e) => e.Name.CompareTo(name) >= 0);
             if (index < 0) {
                 int id = minId + elements.Count;
                 elements.Add(new Element(id, name));
@@ -59,15 +55,15 @@ namespace Inu.Language
             }
         }
 
-        public string FromId(int id)
+        public string? FromId(int id)
         {
-            int index = elements.FindIndex((Element e) => { return e.Id == id; });
+            var index = elements.FindIndex(e => e.Id == id);
             return index >= 0 ? elements[index].Name : null;
         }
 
         public int ToId(string name)
         {
-            int index = elements.FindIndex((Element e) => { return e.Name.Equals(name); });
+            int index = elements.FindIndex((Element e) => e.Name.Equals(name));
             return index >= 0 ? elements[index].Id : InvalidId;
         }
 

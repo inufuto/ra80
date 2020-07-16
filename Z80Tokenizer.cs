@@ -1,11 +1,11 @@
 ﻿using Inu.Language;
-using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 
 namespace Inu.Assembler.Z80
 {
-    class Tokenizer : AbstractTokenizer
+    class Z80Tokenizer : Language.Tokenizer
     {
         private static readonly List<string> KeyWords = new List<string>
         {
@@ -132,13 +132,14 @@ namespace Inu.Assembler.Z80
 
         private const char Comment = ';';
 
-        public Tokenizer() : base(KeyWords) { }
+        public Z80Tokenizer() : base(KeyWords) { }
 
         protected override void SkipSpaces()
         {
         repeat:
             base.SkipSpaces();
             if (LastChar == Comment) {
+                Debug.Assert(SourceReader.Current != null);
                 SourceReader.Current.SkipToEndOfLine();
                 NextChar();
                 goto repeat;

@@ -4,7 +4,7 @@
     {
         static int Main(string[] args)
         {
-            return new Assembler().Main(args);
+            return new Z80Assembler().Main(args);
         }
     }
 }

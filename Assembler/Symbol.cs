@@ -8,7 +8,7 @@ namespace Inu.Assembler
         public int Pass { get; private set; }
         public int Id { get; private set; }
 #if DEBUG
-        private string name;
+        private string? name;
 #endif
         public Address Address { get; set; }
         public bool Public { get; set; } = false;
@@ -20,7 +20,7 @@ namespace Inu.Assembler
             Address = address;
 #if DEBUG
             if (id != 0 && id < 0x8000) {
-                name = Language.AbstractTokenizer.Instance.IdentifierFromId(id);
+                name = Tokenizer.Instance.IdentifierFromId(id);
             }
 #endif   
         }
