@@ -23,7 +23,7 @@ namespace Inu.Language
         public void ShowError(SourcePosition position, string error)
         {
             if (!errors.ContainsKey(position)) {
-                string s = string.Format("{0}: {1}", position.ToString(), error);
+                string s = $"{position.ToString()}: {error}";
                 errors[position] = s;
                 Console.Error.WriteLine(s);
             }

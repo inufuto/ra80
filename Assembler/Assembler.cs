@@ -100,11 +100,24 @@ namespace Inu.Assembler
             listFile.AddByte(value);
         }
 
+        protected void WriteByte(Token token, Address value)
+        {
+            if (value.IsRelocatable() || value.Type == AddressType.External) {
+                Debug.Assert(value.Part!=AddressPart.Word);
+                addressUsages[CurrentSegment.Tail] = value;
+            }
+            else if (!value.IsConst()) {
+                ShowAddressUsageError(token);
+            }
+            WriteByte(value.Value);
+        }
+
         protected abstract byte[] ToBytes(int value);
 
         protected void WriteWord(Token token, Address value)
         {
             if (value.IsRelocatable() || value.Type == AddressType.External) {
+                Debug.Assert(value.Part == AddressPart.Word);
                 addressUsages[CurrentSegment.Tail] = value;
             }
             else if (!value.IsConst()) {
@@ -222,6 +235,12 @@ namespace Inu.Assembler
                 return null;
             }
             if (!right.IsConst()) {
+                if (token.Value == Keyword.Low) {
+                    return right.Low();
+                }
+                if (token.Value == Keyword.High) {
+                    return right.High();
+                }
                 ShowAddressUsageError(rightToken);
             }
             int value = function(right.Value);
@@ -329,19 +348,6 @@ namespace Inu.Assembler
             return Binomial();
         }
 
-        protected int? ByteExpression()
-        {
-            Debug.Assert(LastToken != null);
-            var token = LastToken;
-            var value = Expression();
-            if (value == null) { return null; }
-            if (!value.IsConst()) {
-                ShowAddressUsageError(token);
-            }
-            return value.Value;
-        }
-
-
         private void IncludeDirective()
         {
             Token token = NextToken();
@@ -412,7 +418,7 @@ namespace Inu.Assembler
                 NextToken();
                 return true;
             }
-            int? value = ByteExpression();
+            var value = Expression();
             if (value == null) return false;
             WriteByte(value.Value);
             return true;
@@ -543,15 +549,17 @@ namespace Inu.Assembler
             const int InstructionLength = 2;
             return address.Value - (CurrentAddress.Value + InstructionLength);
         }
-        protected bool RelativeOffset(out Address? address, out int offset)
+        protected bool RelativeOffset(out Address address, out int offset)
         {
             offset = 0;
             Token operand = LastToken;
-            address = Expression();
-            if (address == null) {
+            var expression = Expression();
+            if (expression == null) {
                 ShowSyntaxError();
+                address = Address.Default;
                 return false;
             }
+            address = expression;
             switch (address.Type) {
                 case AddressType.Undefined:
                     return false;

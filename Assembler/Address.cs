@@ -11,17 +11,22 @@ namespace Inu.Assembler
         Undefined = -1, Const = -2, External = -3
     }
 
+    enum AddressPart
+    {
+        Word, LowByte, HighByte
+    }
+
     class Address : IComparable<Address>
     {
-        public AddressType Type { get; private set; }
-        public int Value { get; private set; }
-
-        public int? Id { get; private set; }
+        public readonly AddressType Type;
+        public readonly AddressPart Part;
+        public readonly int Value;
+        public readonly int? Id;
 
         public bool Parenthesized { get; set; } = false;
         public static Address Default => new Address(AddressType.Const, 0);
 
-        public Address(AddressType type, int value, int? id = null)
+        public Address(AddressType type, int value, int? id = null, AddressPart part = AddressPart.Word)
         {
             if (type == AddressType.External) {
                 Debug.Assert(id != null);
@@ -29,11 +34,22 @@ namespace Inu.Assembler
             Type = type;
             Value = value;
             Id = id;
+            Part = part;
         }
 
         public Address(int constValue) : this(AddressType.Const, constValue) { }
 
-        public Address(Stream stream) { Read(stream); }
+        public Address(Stream stream)
+        {
+            Type = (AddressType)(sbyte)stream.ReadByte();
+            Value = stream.ReadWord();
+            if (Type == AddressType.External) {
+                Id = stream.ReadWord();
+            }
+            if (Type != AddressType.Const) {
+                Part = (AddressPart)stream.ReadByte();
+            }
+        }
 
         public bool IsUndefined() { return Type == AddressType.Undefined; }
 
@@ -49,18 +65,15 @@ namespace Inu.Assembler
                 Debug.Assert(Id != null);
                 stream.WriteWord(Id.Value);
             }
-        }
-
-        public void Read(Stream stream)
-        {
-            Type = (AddressType)(sbyte)stream.ReadByte();
-            Value = stream.ReadWord();
-            if (Type == AddressType.External) {
-                Id = stream.ReadWord();
+            if (Type != AddressType.Const) {
+                stream.WriteByte((int)Part);
             }
         }
 
-        public void AddOffset(int offset) { Value += offset; }
+        public Address Add(int offset)
+        {
+            return new Address(Type, Value +offset, Id, Part);
+        }
 
         public static bool operator ==(Address? a, Address? b)
         {
@@ -91,6 +104,16 @@ namespace Inu.Assembler
                 compare = Value.CompareTo(address.Value);
             }
             return compare;
+        }
+
+        public Address? Low()
+        {
+            return Type == AddressType.Const ? new Address(Type, Value & 0xff) : new Address(Type, Value, Id, AddressPart.LowByte);
+        }
+
+        public Address? High()
+        {
+            return Type == AddressType.Const ? new Address(Type, (Value >> 8) & 0xff) : new Address(Type, Value, Id, AddressPart.HighByte);
         }
     }
 }
