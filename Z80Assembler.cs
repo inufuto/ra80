@@ -22,6 +22,18 @@ namespace Inu.Assembler.Z80
             ShowError(token.Position, "Invalid register: " + token.ToString());
         }
 
+        private int? ByteExpression()
+        {
+            Debug.Assert(LastToken != null);
+            var token = LastToken;
+            var value = Expression();
+            if (value == null) { return null; }
+            if (!value.IsConst()) {
+                ShowAddressUsageError(token);
+            }
+            return value.Value;
+        }
+
         private static readonly Dictionary<int, int[]> InstructionsWithoutOperand = new Dictionary<int, int[]>
         {
             {Keyword.LdI, new int[] {0b11101101, 0b10100000}},
